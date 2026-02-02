@@ -1338,6 +1338,11 @@ function renderBars() {
   ui.barHealth.style.width = `${state.health}%`;
   ui.barSocial.style.width = `${state.social}%`;
   ui.barMoney.style.width = `${Math.min(100, Math.floor(state.money / 3000 * 100))}%`;
+  
+  if (ui.barEnergy) {
+    if (state.energy < 15) ui.barEnergy.style.background = "linear-gradient(90deg, rgba(239,68,68,.9), rgba(245,158,11,.85))";
+    else ui.barEnergy.style.background = "linear-gradient(90deg, rgba(43,108,255,.85), rgba(42,214,125,.85))";
+  }
   if (ui.barStress) {
     if (state.stress >= 75) ui.barStress.style.background = "linear-gradient(90deg, rgba(239,68,68,.9), rgba(245,158,11,.85))";
     else ui.barStress.style.background = "linear-gradient(90deg, rgba(43,108,255,.85), rgba(42,214,125,.85))";
@@ -2145,8 +2150,9 @@ function ensureJobCenterButton() {
   }
   const show = jobCenterAvailable();
   btn.style.display = show ? "inline-block" : "none";
-  btn.disabled = state.actionsLeft <= 0;
-  btn.title = state.actionsLeft <= 0 ? "本周行动已用完" : "";
+  const noEnergy = state.energy <= 0;
+  btn.disabled = state.actionsLeft <= 0 || noEnergy;
+  btn.title = state.actionsLeft <= 0 ? "本周行动已用完" : (noEnergy ? "精力值为0，只能选择休息" : "");
 }
 
 function openJobCenterModal() {
@@ -2219,9 +2225,12 @@ function openJobCenterModal() {
       btn.style.width = "100%";
       btn.style.marginBottom = "8px";
       btn.textContent = a.name || a.id;
-      btn.disabled = state.actionsLeft <= 0;
+      const noEnergyExceptRest = state.energy <= 0;
+      btn.disabled = state.actionsLeft <= 0 || noEnergyExceptRest;
+      if (noEnergyExceptRest) btn.title = "精力值为0，只能选择休息";
       btn.addEventListener("click", () => {
         if (state.actionsLeft <= 0) { logLine("本周行动已用完"); return; }
+        if (state.energy <= 0) { logLine("精力值为0，只能选择休息"); return; }
         handleAutumnAction(a);
         closeJobCenterModal();
         if (state.actionsLeft <= 0 && !state.eventPending) nextWeek();
@@ -2718,9 +2727,12 @@ function openKaoyanCenterModal() {
       btn.style.width = "100%";
       btn.style.marginBottom = "8px";
       btn.textContent = a.name || a.id;
-      btn.disabled = state.actionsLeft <= 0 || !ky.univId;
+      const noEnergyExceptRest = state.energy <= 0;
+      btn.disabled = state.actionsLeft <= 0 || !ky.univId || noEnergyExceptRest;
+      if (noEnergyExceptRest) btn.title = "精力值为0，只能选择休息";
       btn.addEventListener("click", () => {
         if (state.actionsLeft <= 0) { logLine("本周行动已用完"); return; }
+        if (state.energy <= 0) { logLine("精力值为0，只能选择休息"); return; }
         handleKaoyanAction(a);
         closeKaoyanCenterModal();
         if (state.actionsLeft <= 0 && !state.eventPending) nextWeek();
@@ -3108,7 +3120,9 @@ function ensureAbroadCenterButton() {
   }
   const show = abroadCenterAvailable();
   btn.style.display = show ? "inline-block" : "none";
-  btn.disabled = state.actionsLeft <= 0;
+  const noEnergy = state.energy <= 0;
+  btn.disabled = state.actionsLeft <= 0 || noEnergy;
+  btn.title = state.actionsLeft <= 0 ? "本周行动已用完" : (noEnergy ? "精力值为0，只能选择休息" : "");
 }
 
 function openAbroadCenterModal() {
@@ -3209,9 +3223,12 @@ function openAbroadCenterModal() {
     btn.style.width = "100%";
     btn.style.marginBottom = "8px";
     btn.textContent = a.name;
-    btn.disabled = state.actionsLeft <= 0;
+    const noEnergyExceptRest = state.energy <= 0;
+    btn.disabled = state.actionsLeft <= 0 || noEnergyExceptRest;
+    if (noEnergyExceptRest) btn.title = "精力值为0，只能选择休息";
     btn.addEventListener("click", () => {
       if (state.actionsLeft <= 0) { logLine("本周行动已用完"); return; }
+      if (state.energy <= 0) { logLine("精力值为0，只能选择休息"); return; }
       handleAbroadAction(a);
       closeAbroadCenterModal();
       if (state.actionsLeft <= 0 && !state.eventPending) nextWeek();
@@ -3719,7 +3736,9 @@ function ensureGongkaoCenterButton() {
   }
   const show = gongkaoCenterAvailable();
   btn.style.display = show ? "inline-block" : "none";
-  btn.disabled = state.actionsLeft <= 0;
+  const noEnergy = state.energy <= 0;
+  btn.disabled = state.actionsLeft <= 0 || noEnergy;
+  btn.title = state.actionsLeft <= 0 ? "本周行动已用完" : (noEnergy ? "精力值为0，只能选择休息" : "");
 }
 
 function openGongkaoCenterModal() {
@@ -3814,9 +3833,12 @@ function openGongkaoCenterModal() {
     btn.style.width = "100%";
     btn.style.marginBottom = "8px";
     btn.textContent = a.name;
-    btn.disabled = state.actionsLeft <= 0 || gk.stage === "waiting_score" || gk.stage === "done";
+    const noEnergyExceptRest = state.energy <= 0;
+    btn.disabled = state.actionsLeft <= 0 || gk.stage === "waiting_score" || gk.stage === "done" || noEnergyExceptRest;
+    if (noEnergyExceptRest) btn.title = "精力值为0，只能选择休息";
     btn.addEventListener("click", () => {
       if (state.actionsLeft <= 0) { logLine("本周行动已用完"); return; }
+      if (state.energy <= 0) { logLine("精力值为0，只能选择休息"); return; }
       handleGongkaoAction(a);
       closeGongkaoCenterModal();
       if (state.actionsLeft <= 0 && !state.eventPending) nextWeek();
@@ -4626,7 +4648,9 @@ function ensurePgCenterButton() {
   }
   const show = pgCenterAvailable();
   btn.style.display = show ? "inline-block" : "none";
-  btn.disabled = state.actionsLeft <= 0;
+  const noEnergy = state.energy <= 0;
+  btn.disabled = state.actionsLeft <= 0 || noEnergy;
+  btn.title = state.actionsLeft <= 0 ? "本周行动已用完" : (noEnergy ? "精力值为0，只能选择休息" : "");
 }
 
 function openPgCenterModal() {
@@ -4712,14 +4736,17 @@ function openPgCenterModal() {
     btn.style.marginTop = "8px";
     btn.textContent = a.name;
     const isSubmit = a.id === "pg_submit";
-    btn.disabled = state.actionsLeft <= 0 || (isSubmit && (state.week !== 4 || pg.flags?.prepushSubmitted));
+    const noEnergyExceptRest = state.energy <= 0;
+    btn.disabled = state.actionsLeft <= 0 || (isSubmit && (state.week !== 4 || pg.flags?.prepushSubmitted)) || noEnergyExceptRest;
     if (isSubmit && state.week !== 4) btn.title = "仅第4周可提交预推免/补录";
     if (isSubmit && pg.flags?.prepushSubmitted) btn.title = "本周已提交";
+    if (noEnergyExceptRest) btn.title = "精力值为0，只能选择休息";
     if (forcePrepush && !isSubmit) {
       btn.disabled = true;
       btn.title = "最后一次行动需提交预推免/补录";
     }
     btn.addEventListener("click", () => {
+      if (state.energy <= 0) { logLine("精力值为0，只能选择休息"); return; }
       handlePgAction(a);
       closePgCenterModal();
       if (state.actionsLeft <= 0 && !state.eventPending) nextWeek();
@@ -5133,14 +5160,20 @@ function renderActions() {
     btn.className = "btn";
     btn.textContent = a.name;
     const askedThisMonth = (a.id === "askParents" && state.parentsAskedAbsMonth === absMonthIndex());
-    btn.disabled = state.actionsLeft <= 0 || askedThisMonth;
+    const noEnergyExceptRest = state.energy <= 0 && a.id !== "rest";
+    btn.disabled = state.actionsLeft <= 0 || askedThisMonth || noEnergyExceptRest;
     if (forcedWork && a.id !== "work") {
       btn.disabled = true;
       btn.title = "Forced work this week: do one work action first.";
     }
     if (askedThisMonth) btn.title = "本月已问过一次";
+    if (noEnergyExceptRest) btn.title = "精力值为0，只能选择休息";
     btn.addEventListener("click", () => {
       if (state.actionsLeft <= 0) return;
+      if (state.energy <= 0 && a.id !== "rest") {
+        logLine("精力值为0，只能选择休息");
+        return;
+      }
       a.do();
 
       // 一周 3 次行动用完后自动进入下一周
