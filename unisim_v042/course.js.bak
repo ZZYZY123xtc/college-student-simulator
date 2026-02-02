@@ -1,0 +1,242 @@
+// course.js
+// =========================
+// 大学生模拟器 v0.4 课程系统（培养方案版）
+// - window.COURSE
+// - 强制课锁死：体育1-4、大学英语1-2、学术英语读写、思政顺序（前六学期）
+// - 自动选课：按8学期计划分配，保证四年修满学分且不冲突
+// - 课程带 slot（上课时间），冲突检测靠 slot
+// =========================
+(() => {
+  const TIME_SLOTS = [
+    "Mon-1", "Mon-2", "Mon-3",
+    "Tue-1", "Tue-2", "Tue-3",
+    "Wed-1", "Wed-2", "Wed-3",
+    "Thu-1", "Thu-2", "Thu-3",
+    "Fri-1", "Fri-2", "Fri-3",
+  ];
+
+  const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
+
+  function courseId(name) {
+    return name.replace(/\s+/g, "_").replace(/[^\w\u4e00-\u9fa5]/g, "");
+  }
+
+  function mkCourse({
+    name,
+    credits = 2,
+    difficulty = 3,
+    examLoad = 2,
+    required = false,
+    locked = false,
+    area = "",
+    type = "",
+    term = 1,          // 1..8 建议学期
+    slot = null,       // 上课时间（用于冲突判断）
+  }) {
+    const id = courseId(name);
+    return { id, name, credits, difficulty, examLoad, required, locked, area, type, term, slot };
+  }
+
+  function hasTimeConflict(a, b) {
+    if (!a?.slot || !b?.slot) return false;
+    return a.slot === b.slot;
+  }
+
+  function conflictsWithAny(course, list) {
+    return list.some(c => hasTimeConflict(course, c));
+  }
+
+  function sumCredits(list) {
+    return list.reduce((s, c) => s + Number(c.credits || 0), 0);
+  }
+
+  // -------- 强制通用课（所有专业通用） --------
+  // 注意：这些课 locked=true，退补选也不能退
+  const GENERAL_REQUIRED_SEQUENCE = [
+    mkCourse({ name: "体育1", credits: 1, difficulty: 1, examLoad: 1, required: true, locked: true, area: "体育", term: 1, slot: "Mon-1" }),
+    mkCourse({ name: "体育2", credits: 1, difficulty: 1, examLoad: 1, required: true, locked: true, area: "体育", term: 2, slot: "Mon-1" }),
+    mkCourse({ name: "体育3", credits: 1, difficulty: 1, examLoad: 1, required: true, locked: true, area: "体育", term: 3, slot: "Mon-1" }),
+    mkCourse({ name: "体育4", credits: 1, difficulty: 1, examLoad: 1, required: true, locked: true, area: "体育", term: 4, slot: "Mon-1" }),
+
+    mkCourse({ name: "大学英语1", credits: 3, difficulty: 3, examLoad: 2, required: true, locked: true, area: "英语", term: 1, slot: "Tue-1" }),
+    mkCourse({ name: "大学英语2", credits: 3, difficulty: 3, examLoad: 2, required: true, locked: true, area: "英语", term: 2, slot: "Tue-1" }),
+
+    mkCourse({ name: "学术英语阅读", credits: 2, difficulty: 3, examLoad: 2, required: true, locked: true, area: "英语", term: 3, slot: "Tue-2" }),
+    mkCourse({ name: "学术英语写作", credits: 2, difficulty: 4, examLoad: 2, required: true, locked: true, area: "英语", term: 4, slot: "Tue-2" }),
+
+    mkCourse({ name: "思政导论", credits: 2, difficulty: 2, examLoad: 2, required: true, locked: true, area: "思政", term: 1, slot: "Wed-1" }),
+    mkCourse({ name: "中国近代史纲要", credits: 2, difficulty: 2, examLoad: 2, required: true, locked: true, area: "思政", term: 2, slot: "Wed-1" }),
+    mkCourse({ name: "马克思主义基本原理", credits: 3, difficulty: 3, examLoad: 3, required: true, locked: true, area: "思政", term: 3, slot: "Wed-1" }),
+    mkCourse({ name: "毛泽东思想和中国特色社会主义理论体系概论", credits: 3, difficulty: 3, examLoad: 3, required: true, locked: true, area: "思政", term: 4, slot: "Wed-1" }),
+    mkCourse({ name: "习近平新时代中国特色社会主义思想概论", credits: 3, difficulty: 3, examLoad: 3, required: true, locked: true, area: "思政", term: 5, slot: "Wed-1" }),
+    mkCourse({ name: "形势与政策", credits: 1, difficulty: 1, examLoad: 1, required: true, locked: true, area: "思政", term: 6, slot: "Wed-1" }),
+  ];
+
+  // -------- 学院核心课池（示例，可继续加） --------
+  // 规则：每门课带 term 建议，slot 尽量不冲突
+  function buildAcademyPool(academy) {
+    const pool = [];
+
+    if (academy === "stem") {
+      pool.push(
+        mkCourse({ name: "高等数学A", credits: 4, difficulty: 5, examLoad: 3, required: true, area: "理工", term: 1, slot: "Thu-1" }),
+        mkCourse({ name: "线性代数", credits: 3, difficulty: 4, examLoad: 3, required: true, area: "理工", term: 1, slot: "Fri-1" }),
+        mkCourse({ name: "程序设计基础", credits: 3, difficulty: 3, examLoad: 2, required: true, area: "理工", term: 2, slot: "Thu-2" }),
+        mkCourse({ name: "概率论与数理统计", credits: 3, difficulty: 4, examLoad: 3, required: true, area: "理工", term: 2, slot: "Fri-2" }),
+        mkCourse({ name: "数据结构", credits: 3, difficulty: 4, examLoad: 3, required: true, area: "理工", term: 3, slot: "Thu-3" }),
+        mkCourse({ name: "数据库基础", credits: 2, difficulty: 3, examLoad: 2, required: false, area: "理工", term: 4, slot: "Fri-3" }),
+        mkCourse({ name: "机器学习导论", credits: 3, difficulty: 4, examLoad: 3, required: false, area: "理工", term: 5, slot: "Thu-2" }),
+        mkCourse({ name: "毕业设计/论文", credits: 6, difficulty: 4, examLoad: 2, required: true, area: "理工", term: 8, slot: "Thu-1" }),
+      );
+    }
+
+    if (academy === "medicine") {
+      pool.push(
+        mkCourse({ name: "人体解剖学", credits: 4, difficulty: 5, examLoad: 3, required: true, area: "医学", term: 1, slot: "Thu-1" }),
+        mkCourse({ name: "生理学", credits: 3, difficulty: 4, examLoad: 3, required: true, area: "医学", term: 2, slot: "Fri-1" }),
+        mkCourse({ name: "病理学", credits: 3, difficulty: 4, examLoad: 3, required: true, area: "医学", term: 3, slot: "Thu-2" }),
+        mkCourse({ name: "药理学", credits: 3, difficulty: 4, examLoad: 3, required: true, area: "医学", term: 4, slot: "Fri-2" }),
+        mkCourse({ name: "临床见习", credits: 4, difficulty: 4, examLoad: 2, required: true, area: "医学", term: 6, slot: "Thu-3" }),
+        mkCourse({ name: "毕业实习/论文", credits: 6, difficulty: 4, examLoad: 2, required: true, area: "医学", term: 8, slot: "Thu-1" }),
+      );
+    }
+
+    if (academy === "biz") {
+      pool.push(
+        mkCourse({ name: "微观经济学", credits: 3, difficulty: 4, examLoad: 3, required: true, area: "商科", term: 1, slot: "Thu-1" }),
+        mkCourse({ name: "宏观经济学", credits: 3, difficulty: 4, examLoad: 3, required: true, area: "商科", term: 2, slot: "Fri-1" }),
+        mkCourse({ name: "会计学基础", credits: 3, difficulty: 3, examLoad: 2, required: true, area: "商科", term: 2, slot: "Thu-2" }),
+        mkCourse({ name: "市场营销", credits: 2, difficulty: 3, examLoad: 2, required: false, area: "商科", term: 3, slot: "Fri-2" }),
+        mkCourse({ name: "管理学", credits: 3, difficulty: 3, examLoad: 2, required: true, area: "商科", term: 3, slot: "Thu-3" }),
+        mkCourse({ name: "商业案例分析", credits: 3, difficulty: 4, examLoad: 2, required: false, area: "商科", term: 4, slot: "Fri-3" }),
+        mkCourse({ name: "毕业论文", credits: 6, difficulty: 3, examLoad: 2, required: true, area: "商科", term: 8, slot: "Thu-1" }),
+      );
+    }
+
+    if (academy === "arts") {
+      pool.push(
+        mkCourse({ name: "学术写作基础", credits: 2, difficulty: 3, examLoad: 2, required: true, area: "文社", term: 1, slot: "Thu-1" }),
+        mkCourse({ name: "社会调查方法", credits: 3, difficulty: 4, examLoad: 3, required: true, area: "文社", term: 2, slot: "Fri-1" }),
+        mkCourse({ name: "统计入门（社科）", credits: 2, difficulty: 3, examLoad: 2, required: false, area: "文社", term: 2, slot: "Thu-2" }),
+        mkCourse({ name: "经典阅读", credits: 2, difficulty: 3, examLoad: 2, required: false, area: "文社", term: 3, slot: "Fri-2" }),
+        mkCourse({ name: "论文写作工作坊", credits: 3, difficulty: 4, examLoad: 2, required: true, area: "文社", term: 4, slot: "Thu-3" }),
+        mkCourse({ name: "毕业论文", credits: 6, difficulty: 4, examLoad: 2, required: true, area: "文社", term: 8, slot: "Thu-1" }),
+      );
+    }
+
+    // 通识/选修池（所有学院）
+    pool.push(
+      mkCourse({ name: "心理健康与自我成长", credits: 2, difficulty: 2, examLoad: 1, required: false, area: "通识", term: 2, slot: "Mon-2" }),
+      mkCourse({ name: "科研入门与文献检索", credits: 2, difficulty: 3, examLoad: 2, required: false, area: "通识", term: 3, slot: "Mon-3" }),
+      mkCourse({ name: "演讲与沟通", credits: 2, difficulty: 2, examLoad: 1, required: false, area: "通识", term: 3, slot: "Tue-3" }),
+      mkCourse({ name: "职业发展与求职", credits: 2, difficulty: 2, examLoad: 1, required: false, area: "通识", term: 5, slot: "Mon-2" }),
+      mkCourse({ name: "创新创业基础", credits: 2, difficulty: 3, examLoad: 2, required: false, area: "通识", term: 6, slot: "Mon-3" }),
+      mkCourse({ name: "跨学科项目实践", credits: 3, difficulty: 4, examLoad: 2, required: false, area: "通识", term: 7, slot: "Tue-3" }),
+    );
+
+    return pool;
+  }
+
+  // -------- 自动培养方案：8学期目标学分（可调）--------
+  const TERM_TARGET_CREDITS = [18, 18, 18, 18, 18, 18, 16, 10]; // 160左右会比较合理；这里总计134+，你可继续加课程池增厚
+
+  function getTermRequiredGeneral(term) {
+    return GENERAL_REQUIRED_SEQUENCE.filter(c => c.term === term);
+  }
+
+  // 生成“整个四年”的计划：每学期固定强制课 + 学院核心/选修填满目标学分
+  function generatePlan(academy) {
+    const pool = buildAcademyPool(academy);
+
+    const plan = {}; // term -> course[]
+    const used = new Set();
+
+    for (let term = 1; term <= 8; term++) {
+      const chosen = [];
+
+      // 1) 强制通用课（锁死）
+      for (const c of getTermRequiredGeneral(term)) {
+        chosen.push({ ...c });
+        used.add(c.id);
+      }
+
+      // 2) 学院/通识课程：先挑 required=true 的（建议 term<=当前term+1）
+      const target = TERM_TARGET_CREDITS[term - 1] || 18;
+
+      const candidatesReq = pool
+        .filter(c => c.term <= term && c.required)
+        .filter(c => !used.has(c.id));
+
+      for (const c of candidatesReq) {
+        if (sumCredits(chosen) >= target) break;
+        if (conflictsWithAny(c, chosen)) continue;
+        chosen.push({ ...c });
+        used.add(c.id);
+      }
+
+      // 3) 再填选修（term<=当前term）
+      const candidatesEle = pool
+        .filter(c => c.term <= term && !c.required)
+        .filter(c => !used.has(c.id));
+
+      // 简单排序：越早term越优先，避免后面没课可上；难度不要全拉满
+      candidatesEle.sort((a, b) => (a.term - b.term) || (a.difficulty - b.difficulty));
+
+      for (const c of candidatesEle) {
+        if (sumCredits(chosen) >= target) break;
+        if (conflictsWithAny(c, chosen)) continue;
+        chosen.push({ ...c });
+        used.add(c.id);
+      }
+
+      // 4) 如果还不够学分，就从“未来term课程”里提前修（不冲突就行）
+      const candidatesFuture = pool
+        .filter(c => c.term > term)
+        .filter(c => !used.has(c.id))
+        .sort((a, b) => (a.term - b.term) || (a.difficulty - b.difficulty));
+
+      for (const c of candidatesFuture) {
+        if (sumCredits(chosen) >= target) break;
+        if (conflictsWithAny(c, chosen)) continue;
+        chosen.push({ ...c, term }); // 提前修：把term视为当前学期上
+        used.add(c.id);
+      }
+
+      plan[term] = chosen;
+    }
+
+    return { plan, poolAll: pool, generalAll: GENERAL_REQUIRED_SEQUENCE, targets: TERM_TARGET_CREDITS };
+  }
+
+  // 取某学期可选池（包含：本学院池 + 通用强制课）
+  function getTermPool(academy, term) {
+    const { poolAll } = generatePlan(academy);
+    const general = getTermRequiredGeneral(term);
+    // poolAll 里也有通识/学院课；强制课单独加
+    const termPool = poolAll
+      .filter(c => (c.term <= term + 1)) // 允许少量“提前看见”的课（更像真实选课系统）
+      .map(c => ({ ...c }));
+    return [...general.map(c => ({ ...c })), ...termPool];
+  }
+
+  // 冲突检测：返回冲突对
+  function findConflicts(list) {
+    const pairs = [];
+    for (let i = 0; i < list.length; i++) {
+      for (let j = i + 1; j < list.length; j++) {
+        if (hasTimeConflict(list[i], list[j])) pairs.push([list[i], list[j]]);
+      }
+    }
+    return pairs;
+  }
+
+  window.COURSE = {
+    TIME_SLOTS,
+    generatePlan,
+    getTermPool,
+    sumCredits,
+    hasTimeConflict,
+    conflictsWithAny,
+    findConflicts,
+  };
+})();

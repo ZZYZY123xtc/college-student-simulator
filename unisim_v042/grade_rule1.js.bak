@@ -1,0 +1,323 @@
+// grade_rule.js
+// =====================================
+// 成绩规则 v3.1（等级制 + 多课同时推进 + 容易课更像真实大学 + 等级/绩点输出）
+//
+// 核心设定：
+// - 一次“学习动作”可以同时喂 4 门课（由 game.js 分配）
+// - 每门课被喂到的“次数”（hits）→ 转换为“等级进度 level”
+// - 难度越高，每次学习涨的等级越少：
+//   diff=1: +2.0  (最简单选修)
+//   diff=2: +1.0  (政治/英语)
+//   diff=3: +0.5  (简单专业基础)
+//   diff=4: +0.4  (中等专业课)
+//   diff=5: +0.3  (最难专业课)
+//
+// - 选修：只要本学期你“学过一次”（totalStudyThisTerm>=1），默认不挂科（>=60）
+// - 政治：常态 80-90（更稳）
+// - 英语：四六级加成（通过后更容易高分）
+// - explain()：开发调试（不进 UI）
+//
+// - 额外：提供 percentToGradeLevel / percentToGradePoint（按截图成绩表）
+//   ⚠️ 统一使用“整数分”映射，避免小数分卡区间缝的 bug
+// =====================================
+
+(() => {
+  const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
+
+  function randNormal(rand = Math.random) {
+    // Box-Muller
+    let u = 0, v = 0;
+    while (u === 0) u = rand();
+    while (v === 0) v = rand();
+    return Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
+  }
+
+  function randRange(a, b, rand = Math.random) {
+    return a + (b - a) * rand();
+  }
+
+  function getCourseParams(course) {
+    const diff = Number(course?.difficulty ?? course?.diff ?? 3);
+    const exam = Number(course?.examLoad ?? course?.exam ?? 2);
+    const credits = Number(course?.credits ?? 2);
+    const required = !!course?.required;
+    const name = String(course?.name ?? "");
+    const type = String(course?.type ?? "");
+    const area = String(course?.area ?? "");
+    return { diff, exam, credits, required, name, type, area };
+  }
+
+  function isPolitics(course) {
+    const { name, type, area } = getCourseParams(course);
+    return /思政|近现代史|马克思|形势与政策/.test(name) || /思政/.test(area) || /思政/.test(type);
+  }
+
+  function isEnglish(course) {
+    const { name, area } = getCourseParams(course);
+    return /英语/.test(name) || /英语/.test(area);
+  }
+
+  function levelGainPerStudy(course) {
+    const { diff } = getCourseParams(course);
+    if (diff <= 1) return 2.0;
+    if (diff === 2) return 1.0;
+    if (diff === 3) return 0.5;
+    if (diff === 4) return 0.4;
+    return 0.3; // diff>=5
+  }
+
+  // 把 level(0..4+) 映射到一个分数区间（再加少量随机/惩罚）
+  function bandFromLevel(level) {
+    if (level >= 4.0) return { band: "A_range",  lo: 92, hi: 99 };
+    if (level >= 3.0) return { band: "A-_range", lo: 86, hi: 93 };
+    if (level >= 2.0) return { band: "B_range",  lo: 76, hi: 85 };
+    if (level >= 1.0) return { band: "C_range",  lo: 60, hi: 75 };
+    if (level >= 0.5) return { band: "D+_range", lo: 50, hi: 59 };
+    return { band: "D_range", lo: 35, hi: 55 };
+  }
+
+  // 难度/考试负担的整体修正
+  function difficultyShift(course) {
+    const p = getCourseParams(course);
+
+    // 基础：难课略低一点点
+    let shift = -(p.diff - 3) * 1.4 - (p.exam - 2) * 0.8 - (p.required ? 0.4 : 0);
+
+    // 政治更稳：整体上提一点
+    if (isPolitics(course)) shift += 2.6;
+
+    // 英语略稳：加一点底座
+    if (isEnglish(course)) shift += 1.2;
+
+    // 很容易的选修（diff<=2 且非必修）别太吃亏
+    if (!p.required && p.diff <= 2) shift += 0.8;
+
+    return shift;
+  }
+
+  function _calcCoursePercentV31(args) {
+    const {
+      course,
+
+      // 这门课被喂了多少次（一次学习动作可以给4门课各+1）
+      studyActionsForThisCourse = 0,
+
+      // 全学期学习动作总数：用于“选修只要学过就不挂”的保底
+      totalStudyThisTerm = 0,
+
+      finalsStudyWeeks = 0,     // 0..3
+      termBonus = 0,            // -10..+10
+      energy = 60,
+      stress = 40,
+      disciplineFlag = false,
+      conflictsResolved = true,
+      flags = {},               // {cet4,cet6}
+      rand = Math.random,
+    } = args || {};
+
+    const p = getCourseParams(course);
+
+    // 1) hits -> level
+    const gain = levelGainPerStudy(course);
+    let level = Number(studyActionsForThisCourse) * gain;
+
+    // 2) 期末周小加成：最多 +0.45 级左右
+    const finalsLv = clamp(Number(finalsStudyWeeks || 0), 0, 3) * 0.15;
+    level += finalsLv;
+
+    // 3) 事件加成：轻微转为“等级”
+    const bonusLv = clamp(Number(termBonus || 0), -10, 10) * 0.03; // ±0.3级
+    level += bonusLv;
+
+    // 4) 保底/偏置（更像真实大学）
+    const pol = isPolitics(course);
+    const eng = isEnglish(course);
+
+    // 选修：只要你本学期至少学习过一次，默认不挂
+    if (!p.required && Number(totalStudyThisTerm) >= 1) {
+      level = Math.max(level, 1.0);
+    }
+
+    // 政治：常态落在 80-90
+    if (pol) {
+      level = Math.max(level, 2.7);
+    }
+
+    // 英语：四六级会显著帮助拿高分
+    if (eng) {
+      level = Math.max(level, 1.6);
+      if (flags?.cet6) level += 0.9;
+      else if (flags?.cet4) level += 0.5;
+    }
+
+    // 5) band + 难度偏移 + 小噪声
+    const band = bandFromLevel(level);
+    const base = randRange(band.lo, band.hi, rand) + difficultyShift(course);
+
+    // 噪声：小一点，避免“努力不如运气”
+    const sigma = 1.6 + p.exam * 0.35;
+    const noise = randNormal(rand) * sigma;
+
+    // 6) 状态惩罚
+    const stressPenalty = stress > 88 ? (stress - 88) * 0.25 : 0;
+    const energyPenalty = energy < 35 ? (35 - energy) * 0.30 : 0;
+    const disciplinePenalty = disciplineFlag ? 8 : 0;
+    const conflictPenalty = conflictsResolved ? 0 : 4;
+
+    let score = base + noise - stressPenalty - energyPenalty - disciplinePenalty - conflictPenalty;
+
+    // 7) 选修保底（防止惩罚把它打回去）
+    if (!p.required && Number(totalStudyThisTerm) >= 1) {
+      score = Math.max(score, 60);
+    }
+
+    // 8) 合理下限
+    const floor = p.required ? 35 : 30;
+    score = clamp(score, floor, 100);
+
+    return score;
+  }
+
+  // ✅ 对外暴露：兼容两种调用方式
+  // - calcCoursePercent({ ...v3.1 args... })
+  // - calcCoursePercent(state, course)  (旧版 game.js)
+  function calcCoursePercent(a, b) {
+    // 旧调用：calcCoursePercent(state, course)
+    if (b && typeof a === "object" && a) {
+      const state = a;
+      const course = b;
+      return _calcCoursePercentV31({
+        course,
+        studyActionsForThisCourse: Number(state?.studyActionsByCourseId?.[course?.id] || 0),
+        totalStudyThisTerm: Number(state?.totalStudyThisTerm || 0),
+        finalsStudyWeeks: Number(state?.finalsStudyWeeksThisTerm || 0),
+        termBonus: Number(state?.termGradeBonus || 0),
+        energy: Number(state?.energy ?? 60),
+        stress: Number(state?.stress ?? 40),
+        disciplineFlag: !!state?.disciplineFlag,
+        conflictsResolved: state?.conflictsResolved !== false, // 默认 true
+        flags: {
+          cet4: !!(state?.certs?.cet4?.pass),
+          cet6: !!(state?.certs?.cet6?.pass),
+          ...(state?.flags || {}),
+        },
+        rand: Math.random,
+      });
+    }
+
+    // 新调用：calcCoursePercent({ ... })
+    return _calcCoursePercentV31(a || {});
+  }
+
+  function explain(args) {
+    const {
+      course,
+      studyActionsForThisCourse = 0,
+      totalStudyThisTerm = 0,
+      finalsStudyWeeks = 0,
+      termBonus = 0,
+      energy = 60,
+      stress = 40,
+      disciplineFlag = false,
+      conflictsResolved = true,
+      flags = {},
+    } = args || {};
+
+    const p = getCourseParams(course);
+    const gain = levelGainPerStudy(course);
+
+    let level = Number(studyActionsForThisCourse) * gain;
+    const finalsLv = clamp(Number(finalsStudyWeeks || 0), 0, 3) * 0.15;
+    const bonusLv = clamp(Number(termBonus || 0), -10, 10) * 0.03;
+    level += finalsLv + bonusLv;
+
+    const pol = isPolitics(course);
+    const eng = isEnglish(course);
+
+    const beforeBiasLevel = level;
+
+    if (!p.required && Number(totalStudyThisTerm) >= 1) level = Math.max(level, 1.0);
+    if (pol) level = Math.max(level, 2.7);
+    if (eng) {
+      level = Math.max(level, 1.6);
+      if (flags?.cet6) level += 0.9;
+      else if (flags?.cet4) level += 0.5;
+    }
+
+    const band = bandFromLevel(level);
+
+    const stressPenalty = stress > 88 ? (stress - 88) * 0.25 : 0;
+    const energyPenalty = energy < 35 ? (35 - energy) * 0.30 : 0;
+    const disciplinePenalty = disciplineFlag ? 8 : 0;
+    const conflictPenalty = conflictsResolved ? 0 : 4;
+
+    return {
+      course: { name: p.name, ...p, isPolitics: pol, isEnglish: eng },
+      study: { studyActionsForThisCourse, levelGainPerStudy: gain, levelFromStudy: Number(studyActionsForThisCourse) * gain },
+      finals: { finalsStudyWeeks, finalsLv },
+      bonus: { termBonus, bonusLv },
+      level: { beforeBiasLevel, afterBiasLevel: level },
+      band,
+      difficultyShift: difficultyShift(course),
+      penalties: { stressPenalty, energyPenalty, disciplinePenalty, conflictPenalty },
+      notes: {
+        elective_pass_floor: (!p.required && Number(totalStudyThisTerm) >= 1),
+        cet: { cet4: !!flags?.cet4, cet6: !!flags?.cet6 }
+      }
+    };
+  }
+
+  // ====== 成绩等级表（按你截图）======
+  const GRADE_TABLE = [
+    { level: "A+", lo: 95, hi: 100, gpLo: 4.5, gpHi: 5.0 },
+    { level: "A",  lo: 90, hi: 94,  gpLo: 4.0, gpHi: 4.4 },
+    { level: "A-", lo: 85, hi: 89,  gpLo: 3.5, gpHi: 3.9 },
+    { level: "B+", lo: 82, hi: 84,  gpLo: 3.2, gpHi: 3.4 },
+    { level: "B",  lo: 78, hi: 81,  gpLo: 2.8, gpHi: 3.1 },
+    { level: "B-", lo: 75, hi: 77,  gpLo: 2.5, gpHi: 2.7 },
+    { level: "C+", lo: 71, hi: 74,  gpLo: 2.1, gpHi: 2.4 },
+    { level: "C",  lo: 66, hi: 70,  gpLo: 1.6, gpHi: 2.0 },
+    { level: "C-", lo: 62, hi: 65,  gpLo: 1.2, gpHi: 1.5 },
+    { level: "D",  lo: 60, hi: 61,  gpLo: 1.0, gpHi: 1.1 },
+    { level: "F",  lo: -Infinity, hi: 59, gpLo: 0.0, gpHi: 0.0 },
+  ];
+
+  function _toIntScore(score) {
+    const s = Number(score);
+    if (!Number.isFinite(s)) return 0;
+    return Math.round(s);
+  }
+
+  function percentToGradeLevel(score) {
+    const s = _toIntScore(score);
+    for (const row of GRADE_TABLE) {
+      if (s >= row.lo && s <= row.hi) return row.level;
+    }
+    return "F";
+  }
+
+  // 在一个等级区间内做线性插值绩点（比如 90~94 对应 4.0~4.4）
+  function percentToGradePoint(score) {
+    const s = _toIntScore(score);
+    const row = GRADE_TABLE.find(r => s >= r.lo && s <= r.hi) || GRADE_TABLE[GRADE_TABLE.length - 1];
+    if (row.gpLo === row.gpHi || row.hi === row.lo) return row.gpLo;
+
+    const t = (s - row.lo) / (row.hi - row.lo); // 0..1
+    const gp = row.gpLo + t * (row.gpHi - row.gpLo);
+    return Math.round(gp * 10) / 10;
+  }
+
+  window.GRADING = {
+    calcCoursePercent,
+    explain,
+    levelGainPerStudy,
+
+    // v3.1 输出：等级 & 绩点
+    percentToGradeLevel,
+    percentToGradePoint,
+
+    // 兼容旧版 game.js 的命名
+    percentToLetter: percentToGradeLevel,
+    percentToGPA: percentToGradePoint,
+  };
+})();

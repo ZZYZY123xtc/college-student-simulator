@@ -1,0 +1,243 @@
+﻿<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>大学生模拟器 v0.4.2（社交/培养方案/退补选弹窗）</title>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <div class="title">大学生模拟器 <span class="ver">v0.4.2</span></div>
+        <div class="sub">社交属性 + 自动培养方案 + 退补选弹窗 + 学期每周3行动/假期每周2行动 + 每周开销 + 每月聚餐1次</div>
+      </div>
+            <div class="meta" id="timeText"></div>
+      <div class="meta" id="devPanel" style="display:flex;align-items:center;gap:8px;">
+        <button class="btn" id="btnSmokeTest" style="display:none;">运行自检</button>
+        <span class="hint" id="smokeResult" style="display:none;"></span>
+      </div>
+    </header>
+
+    <section class="stats">
+      <div class="stat">
+        <div class="row"><span>精力</span><span id="txtEnergy"></span></div>
+        <div class="bar"><div id="barEnergy" class="fill"></div></div>
+      </div>
+      <div class="stat">
+        <div class="row"><span>压力</span><span id="txtStress"></span></div>
+        <div class="bar"><div id="barStress" class="fill"></div></div>
+      </div>
+      <div class="stat">
+        <div class="row"><span>心情</span><span id="txtMood"></span></div>
+        <div class="bar"><div id="barMood" class="fill"></div></div>
+      </div>
+      <div class="stat">
+        <div class="row"><span>健康</span><span id="txtHealth"></span></div>
+        <div class="bar"><div id="barHealth" class="fill"></div></div>
+      </div>
+      <div class="stat">
+        <div class="row"><span>金钱</span><span id="txtMoney"></span></div>
+        <div class="bar"><div id="barMoney" class="fill"></div></div>
+      </div>
+      <div class="stat">
+        <div class="row"><span>社交</span><span id="txtSocial"></span></div>
+        <div class="bar"><div id="barSocial" class="fill"></div></div>
+      </div>
+    </section>
+
+    <nav class="tabs">
+      <button class="tab" data-tab="tabOverview">概览</button>
+      <button class="tab" data-tab="tabCourses">选课&考试</button>
+      <button class="tab" data-tab="tabWeek">本周&日志</button>
+      <button class="tab" data-tab="tabSeason">路线&机会</button>
+    </nav>
+
+    <main class="panes">
+      <section id="tabOverview" class="pane">
+        <h2>开局设置</h2>
+        <div class="grid2">
+          <div class="card">
+            <h3>学院（影响课程池/事件）</h3>
+            <div class="btnRow">
+              <button class="btn" id="btnAcaMed">医</button>
+              <button class="btn" id="btnAcaStem">理工</button>
+              <button class="btn" id="btnAcaBiz">商科</button>
+              <button class="btn" id="btnAcaArts">文社</button>
+            </div>
+            <div class="hint" id="txtAcaHint">请选择学院（开局锁死）。</div>
+          </div>
+
+          <div class="card">
+            <h3>家境（现金流）</h3>
+            <div class="btnRow">
+              <button class="btn" id="btnFamPoor">拮据</button>
+              <button class="btn" id="btnFamOk">普通</button>
+              <button class="btn" id="btnFamMid">小康</button>
+              <button class="btn" id="btnFamRich">富裕</button>
+            </div>
+            <div class="hint" id="txtFamHint">请选择家境（开局锁死）。</div>
+          </div>
+        </div>
+
+        <div class="grid2">
+          <div class="card">
+            <h3>路线（影响人生轨迹与事件）</h3>
+            <div class="btnRow">
+              <button class="btn" id="btnRouteAbroad">出国</button>
+              <button class="btn" id="btnRouteBaoyan">保研</button>
+              <button class="btn" id="btnRouteKaoyan">考研</button>
+              <button class="btn" id="btnRouteGongkao">考公</button>
+              <button class="btn" id="btnRouteQiuzhao">就业</button>
+            </div>
+            <div class="hint" id="txtRouteHint">请选择路线（可后续再改，但会影响事件池）。</div>
+          </div>
+
+          <div class="card">
+            <h3>开始游戏</h3>
+            <button class="btn primary" id="btnStart">开始</button>
+            <div class="hint" id="txtStartHint">提示：第1周选课，第3周退补选（弹窗），期末周14-16。</div>
+          </div>
+        </div>
+      </section>
+
+      <section id="tabCourses" class="pane">
+        <div class="rowBetween">
+          <h2>本学期课程</h2>
+          <div class="btnRow">
+            <button class="btn" id="btnAutoPlan">按培养方案自动选课</button>
+            <button class="btn" id="btnOpenAddDrop">打开退补选</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="hint">强制课已锁死不可改：体育1-4、大学英语1-2、学术英语读写、思政顺序（前六学期）。</div>
+          <div id="courseList"></div>
+        </div>
+
+        <div class="card">
+          <h3>考试/证书</h3>
+          <div id="certList" class="hint"></div>
+        </div>
+
+        <div class="card">
+          <h3>成绩（期末生成）</h3>
+          <div id="gradeList" class="hint">期末周结束后自动生成本学期各科成绩。</div>
+        </div>
+      </section>
+
+      <section id="tabWeek" class="pane">
+        <div class="rowBetween">
+          <h2>本周行动（学期每周3次）</h2>
+          <div class="btnRow">
+            <button class="btn" id="btnNextWeek">结束本周 →</button>
+          </div>
+        </div>
+
+        <div class="grid2">
+          <div class="card">
+            <h3>行动</h3>
+            <div id="actionPanel"></div>
+            <div class="hint" id="txtActionsLeft"></div>
+          </div>
+
+          <div class="card">
+            <h3>日志</h3>
+            <div id="logBox" class="log"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="tabSeason" class="pane">
+        <div class="rowBetween">
+          <h2>路线/机会</h2>
+        </div>
+        <div class="grid2">
+          <div class="card">
+            <h3>当前状态</h3>
+            <div id="seasonSummary" class="hint"></div>
+            <div id="seasonTodo" class="hint"></div>
+            <button class="btn" id="btnRouteTodo">去选择路线</button>
+          </div>
+          <div class="card">
+            <h3>赛季进度</h3>
+            <div id="seasonList" class="hint"></div>
+          </div>
+        </div>
+        <div class="card">
+          <h3>支线面板</h3>
+          <div id="routeStage" class="hint"></div>
+          <div id="routeCountdown" class="hint"></div>
+          <div id="routeMetrics" class="hint"></div>
+          <div id="routeApps" class="hint"></div>
+          <div id="routeOffers" class="hint"></div>
+        </div>
+        <div class="grid2">
+          <div class="card">
+            <h3>徽章/成就</h3>
+            <div id="seasonBadges" class="hint"></div>
+          </div>
+          <div class="card">
+            <h3>机会/offer</h3>
+            <div id="seasonOffers" class="hint"></div>
+          </div>
+        </div>
+        <div class="card">
+          <h3>结局图鉴</h3>
+          <div id="endingList" class="hint"></div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- 事件弹窗 -->
+  <div id="modalEvent" class="modal hidden">
+    <div class="modalCard">
+      <div class="modalTitle" id="evTitle"></div>
+      <div class="modalText" id="evText"></div>
+      <div id="evOptions" class="modalOptions"></div>
+      <div class="modalHint" id="evHint"></div>
+    </div>
+  </div>
+
+  <!-- 退补选弹窗 -->
+  <div id="modalAddDrop" class="modal hidden">
+    <div class="modalCard wide">
+      <div class="rowBetween">
+        <div>
+          <div class="modalTitle">第3周退补选（可反复调整直到不冲突）</div>
+          <div class="modalHint">提示：先加课再自动排冲突也行；强制课不可退。</div>
+        </div>
+        <div class="btnRow">
+          <button class="btn" id="btnResolveConflicts">自动排冲突</button>
+          <button class="btn primary" id="btnCloseAddDrop">完成</button>
+          <button class="iconBtn" id="btnCloseAddDropX" aria-label="关闭">✕</button>
+        </div>
+      </div>
+
+      <div class="grid2">
+        <div class="card flat">
+          <h3>当前已选</h3>
+          <div id="adCurrent"></div>
+        </div>
+        <div class="card flat">
+          <h3>可选课程池（本学期）</h3>
+          <div id="adPool"></div>
+        </div>
+      </div>
+
+      <div class="hint" id="adHint"></div>
+    </div>
+  </div>
+
+  <script src="./course.js?v=042i"></script>
+  <script src="./grade_rule.js?v=042i"></script>
+  <script src="./event.js?v=042j"></script>
+  <script src="./route_spec.js?v=042j"></script>
+  <script src="./log_templates.js?v=042j"></script>
+  <script src="./route_engine.js?v=042j"></script>
+  <script src="./game.js?v=042j"></script>
+</body>
+</html>
+
