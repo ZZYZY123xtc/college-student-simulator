@@ -1,0 +1,256 @@
+// events.js
+// =========================
+// 大学生模拟器 v0.4 事件库（社交版）
+// - window.EVENTS + window.eventMatchesState + window.gate
+// - gates 支持：family/academy/route/week/term/year/flags + socialMin/socialMax
+// - options.effects 支持：显性数值 + hidden/flags/note/termGradeBonus
+// =========================
+(function () {
+  function gate({
+    family = null,
+    academy = null,      // 'medicine'|'stem'|'biz'|'arts'
+    route = null,        // 'research'|'career'|'abroad'
+    weekMin = 1, weekMax = 999,
+    termMin = 1, termMax = 999,
+    yearMin = 1, yearMax = 999,
+    socialMin = 0, socialMax = 100,
+    requireFlags = [],
+    forbidFlags = []
+  } = {}) {
+    return { family, academy, route, weekMin, weekMax, termMin, termMax, yearMin, yearMax, socialMin, socialMax, requireFlags, forbidFlags };
+  }
+
+  function eventMatchesState(ev, state) {
+    if (!ev.gates || ev.gates.length === 0) return true;
+
+    const flags = state.flags || {};
+    return ev.gates.some(g => {
+      if (g.family && state.familyTier !== g.family) return false;
+
+      if (g.academy) {
+        const aca = state.academyNormalized || state.academy;
+        if (aca !== g.academy) return false;
+      }
+      if (g.route && state.route !== g.route) return false;
+
+      if (state.week < g.weekMin || state.week > g.weekMax) return false;
+      if (state.term < g.termMin || state.term > g.termMax) return false;
+      if (state.year < g.yearMin || state.year > g.yearMax) return false;
+
+      const social = Number(state.social ?? 50);
+      if (social < Number(g.socialMin ?? 0) || social > Number(g.socialMax ?? 100)) return false;
+
+      for (const rf of (g.requireFlags || [])) if (!flags[rf]) return false;
+      for (const ff of (g.forbidFlags || [])) if (flags[ff]) return false;
+
+      return true;
+    });
+  }
+
+  const EVENTS = [
+    // ========= 日常 =========
+    {
+      id: "G_GROUP_DINNER",
+      title: "同学喊你聚餐",
+      text: "群里@你：今晚聚餐！你去不去？",
+      tags: ["global", "social"],
+      weight: 10,
+      cooldownWeeks: 3,
+      options: [
+        { text: "去（社交+）", effects: { money: -150, mood: +6, stress: -6, social: +8, hidden: { stability: +1 }, note: "社交回血，钱包掉血。社交值上升。" } },
+        { text: "不去（省钱）", effects: { mood: -2, stress: +2, social: -1, hidden: { stability: +0.5 }, note: "省钱，但略孤独（社交小降）。" } }
+      ]
+    },
+    {
+      id: "G_ROOMMATE_QUARREL",
+      title: "室友吵架",
+      text: "一些生活习惯小事引爆了，你们吵起来了。",
+      tags: ["global", "social"],
+      weight: 8,
+      cooldownWeeks: 4,
+      options: [
+        { text: "硬刚到底", effects: { stress: +6, mood: -4, social: -6, hidden: { stability: -1 }, note: "爽是爽，关系更僵了。" } },
+        { text: "冷静沟通", effects: { stress: +2, mood: -1, social: +3, hidden: { stability: +2 }, note: "短期尴尬，但长期更稳。" } },
+        { text: "装没事转移话题", effects: { stress: +3, mood: -2, social: 0, hidden: { stability: +0.5 }, note: "暂时过去了，但问题没解决。" } }
+      ]
+    },
+    {
+      id: "G_CLUB_INVITE",
+      title: "社团招新",
+      text: "你路过摊位，被拉住：要不要加入我们？",
+      tags: ["global", "social"],
+      weight: 9,
+      cooldownWeeks: 5,
+      options: [
+        { text: "加入（扩大圈子）", effects: { energy: -4, mood: +3, social: +6, hidden: { careerPower: +0.4, stability: +1 }, note: "认识人=潜在机会。" } },
+        { text: "婉拒（保时间）", effects: { termGradeBonus: +1, mood: +1, social: -1, hidden: { academicPower: +0.4 }, note: "把时间留给学习。" } }
+      ]
+    },
+    {
+      id: "G_NETWORKING",
+      title: "人脉局",
+      text: "朋友拉你去一个小型聚会：里面有学长学姐、甚至还有企业的人。",
+      tags: ["global", "social", "rareSeed"],
+      weight: 5,
+      cooldownWeeks: 8,
+      options: [
+        { text: "去并认真社交", effects: { money: -80, energy: -6, mood: +3, social: +10, hidden: { luck: +2, careerPower: +0.6 }, note: "社交+好运种子埋下了。" } },
+        { text: "去但很社恐", effects: { money: -50, mood: -1, stress: +3, social: +2, hidden: { stability: +0.2 }, note: "你去了，但没怎么说话。" } },
+        { text: "不去", effects: { mood: +1, stress: -1, social: -1, hidden: { stability: +1 }, note: "舒服，但机会也会溜走一点点。" } }
+      ]
+    },
+
+    // ========= 学习/健康 =========
+    {
+      id: "G_LIBRARY_AURA",
+      title: "图书馆卷王领域展开",
+      text: "你被旁边的键盘声和翻页声刺激到了。",
+      tags: ["global"],
+      weight: 9,
+      cooldownWeeks: 3,
+      options: [
+        { text: "被带着卷一把", effects: { energy: -6, stress: +5, termGradeBonus: +2, hidden: { academicPower: +1 }, note: "卷=成绩加成，但压力上升。" } },
+        { text: "回寝回血", effects: { energy: +6, stress: -4, mood: +2, hidden: { stability: +1 }, note: "保命优先。" } }
+      ]
+    },
+    {
+      id: "G_MILK_TEA",
+      title: "奶茶诱惑",
+      text: "你路过奶茶店，脑子里出现一个声音：‘就一杯。’",
+      tags: ["global"],
+      weight: 10,
+      cooldownWeeks: 2,
+      options: [
+        { text: "买（快乐+）", effects: { money: -25, mood: +4, stress: -2, hidden: { stability: +0.5 }, note: "情绪回血，钱包小流血。" } },
+        { text: "忍住（自控+）", effects: { mood: -1, termGradeBonus: +1, hidden: { stability: +2 }, note: "延迟满足=长期收益。" } }
+      ]
+    },
+
+    // ========= 路线：科研/就业/出国 =========
+    {
+      id: "R_PI_CALL",
+      title: "科研线：导师抓你跑数据",
+      text: "导师：今晚把那批数据跑完，明早要看图。",
+      tags: ["route:research"],
+      weight: 9,
+      cooldownWeeks: 3,
+      gates: [gate({ route: "research" })],
+      options: [
+        { text: "硬刚通宵", effects: { energy: -16, stress: +12, mood: -2, termGradeBonus: -2, hidden: { researchPower: +1.2 }, note: "科研推进，但学习被挤压。" } },
+        { text: "争取延期", effects: { stress: +6, mood: -2, termGradeBonus: +1, hidden: { researchPower: +0.6, stability: +1 }, note: "保命但有点心虚。" } }
+      ]
+    },
+    {
+      id: "C_INTERVIEW",
+      title: "就业线：面试邀约",
+      text: "HR 发来消息：这周能来面试吗？你突然开始紧张。",
+      tags: ["route:career"],
+      weight: 8,
+      cooldownWeeks: 5,
+      gates: [gate({ route: "career", yearMin: 2 })],
+      options: [
+        { text: "准备+参加", effects: { energy: -10, stress: +8, hidden: { careerPower: +1.5, englishPower: +0.6 }, note: "就业推进。" } },
+        { text: "怂了不去", effects: { mood: -2, stress: +4, hidden: { careerPower: -0.8, stability: -1 }, note: "机会流失。" } }
+      ]
+    },
+    {
+      id: "A_ENGLISH_TEST_BOOK",
+      title: "出国线：语言考试报名",
+      text: "你看到报名窗口：现在报，还来得及冲一把。",
+      tags: ["route:abroad"],
+      weight: 9,
+      cooldownWeeks: 6,
+      gates: [gate({ route: "abroad", socialMin: 0 })],
+      options: [
+        { text: "报名（花钱买机会）", effects: { money: -600, stress: +6, hidden: { englishPower: +1.5, luck: +1 }, flags: { bookedEnglishTest: true }, note: "后续可触发出分事件。" } },
+        { text: "先不报", effects: { stress: -1, mood: +1, hidden: { stability: +1 }, note: "窗口会过去。" } }
+      ]
+    },
+
+    // ========= 期末 =========
+    {
+      id: "E_FINAL_PANIC",
+      title: "期末周：复习焦虑爆炸",
+      text: "你突然意识到：快考试了。心跳像打鼓。",
+      tags: ["exam"],
+      weight: 12,
+      cooldownWeeks: 4,
+      gates: [gate({ weekMin: 14, weekMax: 16 })],
+      options: [
+        { text: "狠狠干复习", effects: { energy: -14, stress: +16, mood: -1, termGradeBonus: +4, hidden: { academicPower: +1.5 }, note: "冲刺收益高。" } },
+        { text: "摆烂装死", effects: { mood: +1, stress: +10, energy: -6, termGradeBonus: -4, hidden: { stability: -3 }, note: "挂科风险暴涨。" } }
+      ]
+    },
+
+    // ========= 四六级（让它回到你的宇宙里）=========
+    {
+      id: "CET4_EXAM",
+      title: "CET-4 考试日",
+      text: "今天是四级考试。你坐在考场里，耳机里传来熟悉的听力开头。",
+      tags: ["cert", "english"],
+      weight: 999, // 由 game.js 强制触发时用，不走随机池也行
+      cooldownWeeks: 999,
+      gates: [gate({ termMin: 2, termMax: 2, weekMin: 12, weekMax: 12, forbidFlags: ["cet4"] })],
+      options: [
+        { text: "稳住发挥", effects: { stress: +6, energy: -6, hidden: { englishPower: +0.3 }, note: "考完了，等出分吧（系统会判定是否通过）。" } }
+      ]
+    },
+    {
+      id: "CET6_EXAM",
+      title: "CET-6 考试日",
+      text: "今天是六级考试。题目比四级阴险很多。",
+      tags: ["cert", "english"],
+      weight: 999,
+      cooldownWeeks: 999,
+      gates: [gate({ termMin: 4, termMax: 4, weekMin: 12, weekMax: 12, requireFlags: ["cet4"], forbidFlags: ["cet6"] })],
+      options: [
+        { text: "狠狠干一把", effects: { stress: +8, energy: -8, hidden: { englishPower: +0.4 }, note: "考完了，等出分吧（系统会判定是否通过）。" } }
+      ]
+    },
+
+    // ========= 稀有：社交高更容易触发的“人生轨迹”种子 =========
+    {
+      id: "RARE_OFFER_SEED",
+      title: "稀有事件：内推机会",
+      text: "你认识的人提了一嘴：他们那边最近正好缺人，可以帮你内推。",
+      tags: ["rare", "life"],
+      weight: 2,
+      cooldownWeeks: 18,
+      gates: [gate({ yearMin: 2, socialMin: 65 })],
+      options: [
+        { text: "马上投递", effects: { stress: +3, energy: -4, social: +2, hidden: { careerPower: +1.3, luck: +2 }, flags: { offerSeed: true }, note: "你抓住了机会（后面可能转化成offer）。" } },
+        { text: "先等等", effects: { mood: +1, hidden: { careerPower: -0.4 }, note: "机会也许会跑掉。" } }
+      ]
+    },
+    {
+      id: "RARE_SCHOOL_RECO_SEED",
+      title: "稀有事件：推荐信种子",
+      text: "老师对你印象不错，说如果你申请项目/学校，可以帮你写推荐。",
+      tags: ["rare", "life"],
+      weight: 2,
+      cooldownWeeks: 20,
+      gates: [gate({ yearMin: 2, socialMin: 70 })],
+      options: [
+        { text: "认真跟进", effects: { energy: -4, stress: +3, social: +2, hidden: { luck: +2, englishPower: +0.5 }, flags: { recoSeed: true }, note: "后面可能触发‘好学校推荐’事件。" } },
+        { text: "随缘", effects: { mood: +1, hidden: { luck: -0.5 }, note: "你错过了更确定的可能性。" } }
+      ]
+    },
+    {
+      id: "RARE_SCI_CHANCE",
+      title: "稀有事件：SCI机会出现",
+      text: "你参与的项目突然有希望出文章。作者顺位像彩票开奖。",
+      tags: ["rare", "route:research", "life"],
+      weight: 1,
+      cooldownWeeks: 24,
+      gates: [gate({ route: "research", yearMin: 2, socialMin: 55 })],
+      options: [
+        { text: "拼到最后（爆肝）", effects: { energy: -22, stress: +18, mood: -2, termGradeBonus: -2, hidden: { researchPower: +2.5, luck: +1 }, flags: { sciCandidate: true }, note: "科研大推进，但学习被挤压。" } },
+        { text: "保命优先", effects: { stress: -6, mood: +1, termGradeBonus: +1, hidden: { researchPower: +1.2, stability: +2 }, note: "稳住更长久。" } }
+      ]
+    },
+  ];
+
+  window.gate = gate;
+  window.eventMatchesState = eventMatchesState;
+  window.EVENTS = EVENTS;
+})();
